@@ -1,0 +1,121 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "std/string.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "iterator basic usage" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+    conn.exec("INSERT INTO zenc_test_suite (name) VALUES ('Alice'), ('Bob')");
+
+    let query_res = conn.query("SELECT id, name FROM zenc_test_suite ORDER BY id");
+    assert(!query_res.is_err(), "Query failed");
+    let result = query_res.unwrap();
+
+    let iter = PgResultIterator::new(&result);
+    assert(iter.has_next(), "Iterator should have rows");
+
+    let row0_opt = iter.next();
+    assert(row0_opt.is_some(), "First row should exist");
+    let row0 = row0_opt.unwrap();
+    let id0 = row0.get(0).unwrap();
+    let name0 = row0.get(1).unwrap();
+    let expected_id0 = String::from("1");
+    let expected_name0 = String::from("Alice");
+    assert(id0 == &expected_id0, "First id should be 1");
+    assert(name0 == &expected_name0, "First name should be Alice");
+    id0.destroy();
+    name0.destroy();
+    expected_id0.destroy();
+    expected_name0.destroy();
+
+    assert(iter.has_next(), "Iterator should have second row");
+    let row1_opt = iter.next();
+    assert(row1_opt.is_some(), "Second row should exist");
+    let row1 = row1_opt.unwrap();
+    let id1 = row1.get(0).unwrap();
+    let name1 = row1.get(1).unwrap();
+    let expected_id1 = String::from("2");
+    let expected_name1 = String::from("Bob");
+    assert(id1 == &expected_id1, "Second id should be 2");
+    assert(name1 == &expected_name1, "Second name should be Bob");
+    id1.destroy();
+    name1.destroy();
+    expected_id1.destroy();
+    expected_name1.destroy();
+
+    assert(!iter.has_next(), "Iterator should be exhausted");
+    let row2_opt = iter.next();
+    assert(row2_opt.is_none(), "Third row should not exist");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "iterator basic usage passed";
+}
+
+test "iterator with null values" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+    conn.exec("INSERT INTO zenc_test_suite (name) VALUES ('Alice'), (NULL)");
+
+    let query_res = conn.query("SELECT name FROM zenc_test_suite ORDER BY id");
+    assert(!query_res.is_err(), "Query failed");
+    let result = query_res.unwrap();
+
+    let iter = PgResultIterator::new(&result);
+
+    let row0_opt = iter.next();
+    assert(row0_opt.is_some(), "First row should exist");
+    let row0 = row0_opt.unwrap();
+    let name0_opt = row0.get(0);
+    assert(name0_opt.is_some(), "First name should not be NULL");
+    let name0 = name0_opt.unwrap();
+    let expected0 = String::from("Alice");
+    assert(name0 == &expected0, "First name should be Alice");
+    name0.destroy();
+    expected0.destroy();
+
+    let row1_opt = iter.next();
+    assert(row1_opt.is_some(), "Second row should exist");
+    let row1 = row1_opt.unwrap();
+    let name1_opt = row1.get(0);
+    assert(name1_opt.is_none(), "Second name should be NULL");
+
+    assert(!iter.has_next(), "Iterator should be exhausted");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "iterator with null values passed";
+}
+
+test "iterator over empty result" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let query_res = conn.query("SELECT name FROM zenc_test_suite");
+    assert(!query_res.is_err(), "Query failed");
+    let result = query_res.unwrap();
+
+    let iter = PgResultIterator::new(&result);
+    assert(!iter.has_next(), "Iterator should be empty");
+    let row_opt = iter.next();
+    assert(row_opt.is_none(), "No rows should exist");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "iterator over empty result passed";
+}
