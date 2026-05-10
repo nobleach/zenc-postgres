@@ -1,0 +1,178 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "std/string.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "transaction commit persists data" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+
+    {
+        let tx_res = conn.begin();
+        assert(!tx_res.is_err(), "BEGIN failed");
+        let tx = tx_res.unwrap();
+
+        let insert_res = tx.exec("INSERT INTO zenc_test_suite (name) VALUES ('Alice')");
+        assert(!insert_res.is_err(), "INSERT in transaction failed");
+
+        let commit_res = tx.commit();
+        assert(!commit_res.is_err(), "COMMIT failed");
+    }
+
+    let query_res = conn.query("SELECT name FROM zenc_test_suite");
+    assert(!query_res.is_err(), "SELECT failed");
+    let result = query_res.unwrap();
+    assert(result.row_count() == 1, "Expected 1 row after commit");
+
+    let name = result.get(0, 0).unwrap();
+    let expected_name = String::from("Alice");
+    assert(name == &expected_name, "Expected name to be Alice");
+    name.destroy();
+    expected_name.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "transaction commit persists data passed";
+}
+
+test "transaction rollback discards data" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+
+    {
+        let tx_res = conn.begin();
+        assert(!tx_res.is_err(), "BEGIN failed");
+        let tx = tx_res.unwrap();
+
+        let insert_res = tx.exec("INSERT INTO zenc_test_suite (name) VALUES ('Bob')");
+        assert(!insert_res.is_err(), "INSERT in transaction failed");
+
+        let rollback_res = tx.rollback();
+        assert(!rollback_res.is_err(), "ROLLBACK failed");
+    }
+
+    let query_res = conn.query("SELECT name FROM zenc_test_suite");
+    assert(!query_res.is_err(), "SELECT failed");
+    let result = query_res.unwrap();
+    assert(result.row_count() == 0, "Expected 0 rows after rollback");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "transaction rollback discards data passed";
+}
+
+test "transaction auto rollback on drop" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+
+    {
+        let tx_res = conn.begin();
+        assert(!tx_res.is_err(), "BEGIN failed");
+        let tx = tx_res.unwrap();
+
+        let insert_res = tx.exec("INSERT INTO zenc_test_suite (name) VALUES ('Charlie')");
+        assert(!insert_res.is_err(), "INSERT in transaction failed");
+
+        // tx dropped here without commit, should auto-rollback
+    }
+
+    let query_res = conn.query("SELECT name FROM zenc_test_suite");
+    assert(!query_res.is_err(), "SELECT failed");
+    let result = query_res.unwrap();
+    assert(result.row_count() == 0, "Expected 0 rows after auto-rollback");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "transaction auto rollback on drop passed";
+}
+
+test "transaction query returns rows" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+    conn.exec("INSERT INTO zenc_test_suite (name) VALUES ('Alice'), ('Bob')");
+
+    {
+        let tx_res = conn.begin();
+        assert(!tx_res.is_err(), "BEGIN failed");
+        let tx = tx_res.unwrap();
+
+        let query_res = tx.query("SELECT name FROM zenc_test_suite ORDER BY id");
+        assert(!query_res.is_err(), "SELECT in transaction failed");
+        let result = query_res.unwrap();
+        assert(result.row_count() == 2, "Expected 2 rows");
+
+        let name0 = result.get(0, 0).unwrap();
+        let expected_name0 = String::from("Alice");
+        assert(name0 == &expected_name0, "First name should be Alice");
+        name0.destroy();
+        expected_name0.destroy();
+
+        tx.commit();
+    }
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "transaction query returns rows passed";
+}
+
+test "transaction exec_params and query_params" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT, age INT)");
+    conn.exec("INSERT INTO zenc_test_suite (name, age) VALUES ('Alice', 30)");
+
+    {
+        let tx_res = conn.begin();
+        assert(!tx_res.is_err(), "BEGIN failed");
+        let tx = tx_res.unwrap();
+
+        let params = ["Bob", "25"];
+        let insert_res = tx.exec_params(
+            "INSERT INTO zenc_test_suite (name, age) VALUES ($1, $2)",
+            params, 2
+        );
+        assert(!insert_res.is_err(), "Parameterized INSERT in transaction failed");
+
+        let query_params = ["Bob"];
+        let query_res = tx.query_params(
+            "SELECT name, age FROM zenc_test_suite WHERE name = $1",
+            query_params, 1
+        );
+        assert(!query_res.is_err(), "Parameterized SELECT in transaction failed");
+        let result = query_res.unwrap();
+        assert(result.row_count() == 1, "Expected 1 row");
+
+        let age = result.get(0, 1).unwrap();
+        let expected_age = String::from("25");
+        assert(age == &expected_age, "Age should be 25");
+        age.destroy();
+        expected_age.destroy();
+
+        tx.commit();
+    }
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "transaction exec_params and query_params passed";
+}

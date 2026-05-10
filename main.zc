@@ -32,8 +32,8 @@ fn main() {
                     println "Rows: {result.row_count()}, Columns: {result.column_count()}";
 
                     for (let i = 0; i < result.row_count(); i = i + 1) {
-                        let id = result.get(i, 0);
-                        let name = result.get(i, 1);
+                        let id = result.get(i, 0).unwrap();
+                        let name = result.get(i, 1).unwrap();
                         println "{id} | {name}";
                         id.destroy();
                         name.destroy();

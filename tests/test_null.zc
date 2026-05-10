@@ -5,7 +5,7 @@ import "std/string.zc"
 import "../pg/pg.zc"
 import "./common.zc"
 
-test "is_null detects null values" {
+test "get returns None for null values" {
     let conninfo = get_test_conninfo();
     let conn_res = PgConnection::new(conninfo);
     assert(!conn_res.is_err(), "Connection failed");
@@ -20,14 +20,10 @@ test "is_null detects null values" {
     let result = query_res.unwrap();
 
     assert(result.row_count() == 1, "Expected 1 row");
-    assert(result.is_null(0, 0), "Expected name to be NULL");
 
-    let value = result.get(0, 0);
-    let expected_empty = String::from("");
-    assert(value == &expected_empty, "Expected empty string for NULL");
-    value.destroy();
-    expected_empty.destroy();
+    let maybe_name = result.get(0, 0);
+    assert(maybe_name.is_none(), "Expected name to be NULL");
 
     conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
-    "is_null detects null values passed";
+    "get returns None for null values passed";
 }

@@ -99,8 +99,8 @@ fn main() {
     println "Rows: {result.row_count()}, Columns: {result.column_count()}";
 
     for (let i = 0; i < result.row_count(); i = i + 1) {
-        let id   = result.get(i, 0);
-        let name = result.get(i, 1);
+        let id   = result.get(i, 0).unwrap();
+        let name = result.get(i, 1).unwrap();
         println "{id} | {name}";
         id.destroy();
         name.destroy();
@@ -154,9 +154,24 @@ Represents the result of a `query()` call.
 |--------|-----------|-------------|
 | `row_count` | `fn row_count(self) -> c_int` | Number of rows in the result |
 | `column_count` | `fn column_count(self) -> c_int` | Number of columns in the result |
-| `get` | `fn get(self, row: c_int, col: c_int) -> String` | Returns the value at `(row, col)` as a `String` |
-| `is_null` | `fn is_null(self, row: c_int, col: c_int) -> bool` | Returns `true` if the cell value is SQL `NULL` |
+| `get` | `fn get(self, row: c_int, col: c_int) -> Option<String>` | Returns the value at `(row, col)` as an `Option<String>` — `None` for SQL `NULL` |
 | `column_name` | `fn column_name(self, col: c_int) -> String` | Returns the name of the given column |
+
+### `Transaction`
+
+Represents an active database transaction. Created via `PgConnection::begin()`.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `commit` | `fn commit(self) -> Result<bool>` | Commits the transaction |
+| `rollback` | `fn rollback(self) -> Result<bool>` | Rolls back the transaction |
+| `exec` | `fn exec(self, sql: char*) -> Result<bool>` | Executes a SQL command inside the transaction |
+| `query` | `fn query(self, sql: char*) -> Result<PgResult>` | Executes a query inside the transaction |
+| `exec_params` | `fn exec_params(self, sql: char*, params: char**, nParams: c_int) -> Result<bool>` | Parameterized command inside the transaction |
+| `query_params` | `fn query_params(self, sql: char*, params: char**, nParams: c_int) -> Result<PgResult>` | Parameterized query inside the transaction |
+| `last_error` | `fn last_error(self) -> String` | Returns the last libpq error message |
+
+> **Note:** The `PgConnection` used to start the transaction must outlive the `Transaction` object. Dropping a `Transaction` without calling `commit()` or `rollback()` automatically issues `ROLLBACK`.
 
 ---
 
@@ -198,12 +213,17 @@ Both `PgConnection` and `PgResult` implement `Drop`, so resources are freed auto
 }
 ```
 
-**String lifetimes:** `PgResult::get()` and `PgResult::column_name()` return **owned** `String` values. You must call `.destroy()` (or `.free()`) on them when done, or let them fall out of scope (if `Drop` is ever implemented for `String` in your ZenC version, this may become automatic).
+**String lifetimes:** `PgResult::get()` returns an `Option<String>` and `PgResult::column_name()` returns an owned `String`. You must call `.destroy()` on the unwrapped `String` values when done, or let them fall out of scope.
 
 ```zc
-let name = result.get(0, 1);
-println "Name: {name}";
-name.destroy();
+let maybe_name = result.get(0, 1);
+if (maybe_name.is_some()) {
+    let name = maybe_name.unwrap();
+    println "Name: {name}";
+    name.destroy();
+} else {
+    println "Name is NULL";
+}
 ```
 
 ---
@@ -227,13 +247,14 @@ If `libpq-fe.h` is in a non-standard location (e.g. macOS Homebrew), add:
 ### Checking for NULL values
 
 ```zc
-let value = result.get(0, 2);
-if (result.is_null(0, 2)) {
+let maybe_value = result.get(0, 2);
+if (maybe_value.is_none()) {
     println "Value is NULL";
 } else {
+    let value = maybe_value.unwrap();
     println "Value: {value}";
+    value.destroy();
 }
-value.destroy();
 ```
 
 ### Getting column names dynamically
@@ -259,6 +280,32 @@ if (r1.is_ok() && r2.is_ok() && r3.is_ok()) {
     println "Transaction committed";
 } else {
     conn.exec("ROLLBACK");
+    println "Transaction rolled back";
+}
+```
+
+### Transactions
+
+Use the `Transaction` struct for safer transaction handling with automatic rollback on drop:
+
+```zc
+let conn = PgConnection::new("host=localhost dbname=shop").unwrap();
+
+let tx_res = conn.begin();
+if (tx_res.is_err()) {
+    println "BEGIN failed: {tx_res.err}";
+    return;
+}
+let tx = tx_res.unwrap();
+
+let r1 = tx.exec("UPDATE inventory SET qty = qty - 1 WHERE id = 42");
+let r2 = tx.exec("INSERT INTO orders (item_id) VALUES (42)");
+
+if (r1.is_ok() && r2.is_ok()) {
+    tx.commit();
+    println "Transaction committed";
+} else {
+    tx.rollback();
     println "Transaction rolled back";
 }
 ```
@@ -326,11 +373,11 @@ If no server is available, the tests and demo will report connection errors.
 ## Future Work
 
 - [x] **Parameterized queries** — `PQexecParams` wrapper for safe value binding
-- [ ] **Transactions** — Dedicated `Transaction` struct with `commit()` / `rollback()`
+- [x] **Transactions** — Dedicated `Transaction` struct with `commit()` / `rollback()`
 - [ ] **Async support** — Integration with ZenC's `async` / `await`
 - [ ] **Connection pooling** — Simple pool for concurrent workloads
 - [ ] **Iterator interface** — Row-by-row iteration over `PgResult`
-- [ ] **Better NULL handling** — Return `Option<String>` instead of empty strings
+- [x] **Better NULL handling** — Return `Option<String>` instead of empty strings
 
 ---
 

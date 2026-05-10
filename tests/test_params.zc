@@ -46,7 +46,7 @@ test "query_params selects with where clause" {
     assert(result.row_count() == 1, "Expected exactly 1 row");
     assert(result.column_count() == 2, "Expected 2 columns");
 
-    let name = result.get(0, 1);
+    let name = result.get(0, 1).unwrap();
     let expected_name = String::from("Bob");
     assert(name == &expected_name, "Expected name to be Bob");
     name.destroy();
@@ -78,7 +78,9 @@ test "exec_params with null parameter" {
     let result = query_res.unwrap();
 
     assert(result.row_count() == 1, "Expected 1 row");
-    assert(result.is_null(0, 0), "Expected name to be NULL");
+
+    let maybe_name = result.get(0, 0);
+    assert(maybe_name.is_none(), "Expected name to be NULL");
 
     conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
     "exec_params with null parameter passed";
@@ -107,7 +109,7 @@ test "exec_params prevents sql injection" {
     let result = verify_res.unwrap();
 
     assert(result.row_count() == 1, "Expected 1 row");
-    let name = result.get(0, 0);
+    let name = result.get(0, 0).unwrap();
     let expected_name = String::from("'; DROP TABLE zenc_test_suite; --");
     assert(name == &expected_name, "Malicious string should be stored as literal text");
     name.destroy();

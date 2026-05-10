@@ -33,8 +33,8 @@ test "query returns correct rows and columns" {
     expected_col0.destroy();
     expected_col1.destroy();
 
-    let id0 = result.get(0, 0);
-    let name0 = result.get(0, 1);
+    let id0 = result.get(0, 0).unwrap();
+    let name0 = result.get(0, 1).unwrap();
     let expected_id0 = String::from("1");
     let expected_name0 = String::from("Alice");
     assert(id0 == &expected_id0, "First id should be 1");
@@ -44,8 +44,8 @@ test "query returns correct rows and columns" {
     expected_id0.destroy();
     expected_name0.destroy();
 
-    let id1 = result.get(1, 0);
-    let name1 = result.get(1, 1);
+    let id1 = result.get(1, 0).unwrap();
+    let name1 = result.get(1, 1).unwrap();
     let expected_id1 = String::from("2");
     let expected_name1 = String::from("Bob");
     assert(id1 == &expected_id1, "Second id should be 2");

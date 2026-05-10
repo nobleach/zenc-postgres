@@ -1,5 +1,6 @@
 import "./sys.zc"
 
+import "std/option.zc"
 import "std/result.zc"
 import "std/string.zc"
 
@@ -98,6 +99,14 @@ impl PgConnection {
     fn last_error(self) -> String {
         return String::from(_z_pg_error(self.handle));
     }
+
+    fn begin(self) -> Result<Transaction> {
+        let res = self.exec("BEGIN");
+        if (res.is_err()) {
+            return Result<Transaction>::Err("BEGIN failed");
+        }
+        return Result<Transaction>::Ok(Transaction { handle: self.handle, committed: false });
+    }
 }
 
 impl Drop for PgConnection {
@@ -122,15 +131,11 @@ impl PgResult {
         return String::from(_z_pg_fname(self.handle, col));
     }
 
-    fn get(self, row: c_int, col: c_int) -> String {
+    fn get(self, row: c_int, col: c_int) -> Option<String> {
         if (_z_pg_getisnull(self.handle, row, col)) {
-            return String::from("");
+            return Option<String>::None();
         }
-        return String::from(_z_pg_getvalue(self.handle, row, col));
-    }
-
-    fn is_null(self, row: c_int, col: c_int) -> bool {
-        return _z_pg_getisnull(self.handle, row, col) != 0;
+        return Option<String>::Some(String::from(_z_pg_getvalue(self.handle, row, col)));
     }
 }
 
@@ -139,6 +144,99 @@ impl Drop for PgResult {
         if (self.handle != NULL) {
             _z_pg_clear(self.handle);
             self.handle = NULL;
+        }
+    }
+}
+
+struct Transaction {
+    handle: void*;
+    committed: bool;
+}
+
+impl Transaction {
+    fn commit(self) -> Result<bool> {
+        self.committed = true;
+        let res = self.exec("COMMIT");
+        if (res.is_err()) {
+            return Result<bool>::Err("COMMIT failed");
+        }
+        return Result<bool>::Ok(true);
+    }
+
+    fn rollback(self) -> Result<bool> {
+        self.committed = true;
+        let res = self.exec("ROLLBACK");
+        if (res.is_err()) {
+            return Result<bool>::Err("ROLLBACK failed");
+        }
+        return Result<bool>::Ok(true);
+    }
+
+    fn exec(self, sql: char*) -> Result<bool> {
+        let res = _z_pg_exec(self.handle, sql);
+        if (res == NULL) {
+            return Result<bool>::Err("Exec failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        _z_pg_clear(res);
+        if (status != _z_pg_res_command_ok()) {
+            return Result<bool>::Err("Exec failed");
+        }
+        return Result<bool>::Ok(true);
+    }
+
+    fn query(self, sql: char*) -> Result<PgResult> {
+        let res = _z_pg_exec(self.handle, sql);
+        if (res == NULL) {
+            return Result<PgResult>::Err("Query failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        if (status != _z_pg_res_command_ok() && status != _z_pg_res_tuples_ok()) {
+            _z_pg_clear(res);
+            return Result<PgResult>::Err("Query failed");
+        }
+        return Result<PgResult>::Ok(PgResult { handle: res });
+    }
+
+    fn query_params(self, sql: char*, params: char**, nParams: c_int) -> Result<PgResult> {
+        let res = _z_pg_exec_params(self.handle, sql, nParams, params);
+        if (res == NULL) {
+            return Result<PgResult>::Err("Query params failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        if (status != _z_pg_res_command_ok() && status != _z_pg_res_tuples_ok()) {
+            _z_pg_clear(res);
+            return Result<PgResult>::Err("Query params failed");
+        }
+        return Result<PgResult>::Ok(PgResult { handle: res });
+    }
+
+    fn exec_params(self, sql: char*, params: char**, nParams: c_int) -> Result<bool> {
+        let res = _z_pg_exec_params(self.handle, sql, nParams, params);
+        if (res == NULL) {
+            return Result<bool>::Err("Exec params failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        _z_pg_clear(res);
+        if (status != _z_pg_res_command_ok()) {
+            return Result<bool>::Err("Exec params failed");
+        }
+        return Result<bool>::Ok(true);
+    }
+
+    fn last_error(self) -> String {
+        return String::from(_z_pg_error(self.handle));
+    }
+}
+
+impl Drop for Transaction {
+    fn drop(self) {
+        if (!self.committed && self.handle != NULL) {
+            let res = _z_pg_exec(self.handle, "ROLLBACK");
+            if (res != NULL) {
+                _z_pg_clear(res);
+            }
+            self.committed = true;
         }
     }
 }
