@@ -1,0 +1,241 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "std/string.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "async connect returns valid connection" {
+    let conninfo = get_test_conninfo();
+    let future = pg_connect_async(conninfo);
+    let conn_res = await future;
+    assert(!conn_res.is_err(), "Async connection failed");
+    let conn = conn_res.unwrap();
+
+    let query_res = conn.query("SELECT 1 AS one");
+    assert(!query_res.is_err(), "Query on async connection failed");
+    let result = query_res.unwrap();
+    assert(result.row_count() == 1, "Expected 1 row");
+
+    let val = result.get(0, 0).unwrap();
+    let expected = String::from("1");
+    assert(val == &expected, "Expected 1");
+    val.destroy();
+    expected.destroy();
+}
+
+test "parallel async connections" {
+    let conninfo = get_test_conninfo();
+
+    let f1 = pg_connect_async(conninfo);
+    let f2 = pg_connect_async(conninfo);
+
+    let conn_res1 = await f1;
+    let conn_res2 = await f2;
+
+    assert(!conn_res1.is_err(), "First async connection failed");
+    assert(!conn_res2.is_err(), "Second async connection failed");
+
+    let conn1 = conn_res1.unwrap();
+    let conn2 = conn_res2.unwrap();
+
+    let q1 = conn1.query("SELECT 1 AS one");
+    let q2 = conn2.query("SELECT 2 AS two");
+
+    assert(!q1.is_err(), "Query on conn1 failed");
+    assert(!q2.is_err(), "Query on conn2 failed");
+
+    let r1 = q1.unwrap();
+    let r2 = q2.unwrap();
+
+    let v1 = r1.get(0, 0).unwrap();
+    let v2 = r2.get(0, 0).unwrap();
+    let expected1 = String::from("1");
+    let expected2 = String::from("2");
+    assert(v1 == &expected1, "Expected 1 from conn1");
+    assert(v2 == &expected2, "Expected 2 from conn2");
+    v1.destroy();
+    v2.destroy();
+    expected1.destroy();
+    expected2.destroy();
+}
+
+test "async exec and query" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    conn.exec("CREATE TABLE zenc_async_test (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let exec_future = pg_exec_async(&conn, "INSERT INTO zenc_async_test (name) VALUES ('Alice'), ('Bob')");
+    let exec_res = await exec_future;
+    assert(!exec_res.is_err(), "Async exec failed");
+
+    let query_future = pg_query_async(&conn, "SELECT name FROM zenc_async_test ORDER BY id");
+    let query_res = await query_future;
+    assert(!query_res.is_err(), "Async query failed");
+    let result = query_res.unwrap();
+    assert(result.row_count() == 2, "Expected 2 rows");
+
+    let name0 = result.get(0, 0).unwrap();
+    let name1 = result.get(1, 0).unwrap();
+    let expected0 = String::from("Alice");
+    let expected1 = String::from("Bob");
+    assert(name0 == &expected0, "First name should be Alice");
+    assert(name1 == &expected1, "Second name should be Bob");
+    name0.destroy();
+    name1.destroy();
+    expected0.destroy();
+    expected1.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    "async exec and query passed";
+}
+
+test "async transaction commit" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    conn.exec("CREATE TABLE zenc_async_test (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let begin_future = pg_begin_async(&conn);
+    let begin_res = await begin_future;
+    assert(!begin_res.is_err(), "Async BEGIN failed");
+    let tx = begin_res.unwrap();
+
+    let insert_future = pg_tx_exec_async(&tx, "INSERT INTO zenc_async_test (name) VALUES ('Charlie')");
+    let insert_res = await insert_future;
+    assert(!insert_res.is_err(), "Async INSERT in tx failed");
+
+    let commit_future = pg_tx_commit_async(&tx);
+    let commit_res = await commit_future;
+    assert(!commit_res.is_err(), "Async COMMIT failed");
+
+    let verify_res = conn.query("SELECT name FROM zenc_async_test");
+    assert(!verify_res.is_err(), "Verify query failed");
+    let result = verify_res.unwrap();
+    assert(result.row_count() == 1, "Expected 1 row after commit");
+
+    let name = result.get(0, 0).unwrap();
+    let expected = String::from("Charlie");
+    assert(name == &expected, "Expected Charlie");
+    name.destroy();
+    expected.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    "async transaction commit passed";
+}
+
+test "async transaction rollback" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    conn.exec("CREATE TABLE zenc_async_test (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let begin_future = pg_begin_async(&conn);
+    let begin_res = await begin_future;
+    assert(!begin_res.is_err(), "Async BEGIN failed");
+    let tx = begin_res.unwrap();
+
+    let insert_future = pg_tx_exec_async(&tx, "INSERT INTO zenc_async_test (name) VALUES ('Delta')");
+    let insert_res = await insert_future;
+    assert(!insert_res.is_err(), "Async INSERT in tx failed");
+
+    let rollback_future = pg_tx_rollback_async(&tx);
+    let rollback_res = await rollback_future;
+    assert(!rollback_res.is_err(), "Async ROLLBACK failed");
+
+    let verify_res = conn.query("SELECT name FROM zenc_async_test");
+    assert(!verify_res.is_err(), "Verify query failed");
+    let result = verify_res.unwrap();
+    assert(result.row_count() == 0, "Expected 0 rows after rollback");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    "async transaction rollback passed";
+}
+
+test "async parameterized query" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    conn.exec("CREATE TABLE zenc_async_test (id SERIAL PRIMARY KEY, name TEXT, age INT)");
+    conn.exec("INSERT INTO zenc_async_test (name, age) VALUES ('Alice', 30), ('Bob', 25)");
+
+    let params = ["Bob"];
+    let future = pg_query_params_async(&conn, "SELECT name, age FROM zenc_async_test WHERE name = $1", params, 1);
+    let query_res = await future;
+    assert(!query_res.is_err(), "Async parameterized query failed");
+    let result = query_res.unwrap();
+    assert(result.row_count() == 1, "Expected 1 row");
+
+    let name = result.get(0, 0).unwrap();
+    let age = result.get(0, 1).unwrap();
+    let expected_name = String::from("Bob");
+    let expected_age = String::from("25");
+    assert(name == &expected_name, "Name should be Bob");
+    assert(age == &expected_age, "Age should be 25");
+    name.destroy();
+    age.destroy();
+    expected_name.destroy();
+    expected_age.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_async_test");
+    "async parameterized query passed";
+}
+
+test "parallel async queries on different connections" {
+    let conninfo = get_test_conninfo();
+
+    let conn_res1 = PgConnection::new(conninfo);
+    let conn_res2 = PgConnection::new(conninfo);
+    assert(!conn_res1.is_err(), "Connection 1 failed");
+    assert(!conn_res2.is_err(), "Connection 2 failed");
+    let conn1 = conn_res1.unwrap();
+    let conn2 = conn_res2.unwrap();
+
+    conn1.exec("DROP TABLE IF EXISTS zenc_async_test1");
+    conn1.exec("CREATE TABLE zenc_async_test1 (id SERIAL PRIMARY KEY, name TEXT)");
+    conn1.exec("INSERT INTO zenc_async_test1 (name) VALUES ('Conn1')");
+
+    conn2.exec("DROP TABLE IF EXISTS zenc_async_test2");
+    conn2.exec("CREATE TABLE zenc_async_test2 (id SERIAL PRIMARY KEY, name TEXT)");
+    conn2.exec("INSERT INTO zenc_async_test2 (name) VALUES ('Conn2')");
+
+    let f1 = pg_query_async(&conn1, "SELECT name FROM zenc_async_test1");
+    let f2 = pg_query_async(&conn2, "SELECT name FROM zenc_async_test2");
+
+    let res1 = await f1;
+    let res2 = await f2;
+
+    assert(!res1.is_err(), "Query on conn1 failed");
+    assert(!res2.is_err(), "Query on conn2 failed");
+
+    let r1 = res1.unwrap();
+    let r2 = res2.unwrap();
+
+    let name1 = r1.get(0, 0).unwrap();
+    let name2 = r2.get(0, 0).unwrap();
+    let expected1 = String::from("Conn1");
+    let expected2 = String::from("Conn2");
+    assert(name1 == &expected1, "Expected Conn1");
+    assert(name2 == &expected2, "Expected Conn2");
+    name1.destroy();
+    name2.destroy();
+    expected1.destroy();
+    expected2.destroy();
+
+    conn1.exec("DROP TABLE IF EXISTS zenc_async_test1");
+    conn2.exec("DROP TABLE IF EXISTS zenc_async_test2");
+    "parallel async queries on different connections passed";
+}

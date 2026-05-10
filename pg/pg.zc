@@ -240,3 +240,56 @@ impl Drop for Transaction {
         }
     }
 }
+
+// --- Async wrappers ---
+// Note: ZenC's async/await is currently implemented using OS threads.
+// These wrappers spawn a background thread to run the blocking libpq call.
+// The connection / transaction pointer must remain valid until the future is awaited.
+
+async fn pg_connect_async(conninfo: char*) -> Result<PgConnection> {
+    return PgConnection::new(conninfo);
+}
+
+async fn pg_query_async(conn: PgConnection*, sql: char*) -> Result<PgResult> {
+    return conn.query(sql);
+}
+
+async fn pg_exec_async(conn: PgConnection*, sql: char*) -> Result<bool> {
+    return conn.exec(sql);
+}
+
+async fn pg_query_params_async(conn: PgConnection*, sql: char*, params: char**, nParams: int) -> Result<PgResult> {
+    return conn.query_params(sql, params, nParams);
+}
+
+async fn pg_exec_params_async(conn: PgConnection*, sql: char*, params: char**, nParams: int) -> Result<bool> {
+    return conn.exec_params(sql, params, nParams);
+}
+
+async fn pg_begin_async(conn: PgConnection*) -> Result<Transaction> {
+    return conn.begin();
+}
+
+async fn pg_tx_commit_async(tx: Transaction*) -> Result<bool> {
+    return tx.commit();
+}
+
+async fn pg_tx_rollback_async(tx: Transaction*) -> Result<bool> {
+    return tx.rollback();
+}
+
+async fn pg_tx_exec_async(tx: Transaction*, sql: char*) -> Result<bool> {
+    return tx.exec(sql);
+}
+
+async fn pg_tx_query_async(tx: Transaction*, sql: char*) -> Result<PgResult> {
+    return tx.query(sql);
+}
+
+async fn pg_tx_query_params_async(tx: Transaction*, sql: char*, params: char**, nParams: int) -> Result<PgResult> {
+    return tx.query_params(sql, params, nParams);
+}
+
+async fn pg_tx_exec_params_async(tx: Transaction*, sql: char*, params: char**, nParams: int) -> Result<bool> {
+    return tx.exec_params(sql, params, nParams);
+}

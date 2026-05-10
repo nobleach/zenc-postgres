@@ -173,6 +173,27 @@ Represents an active database transaction. Created via `PgConnection::begin()`.
 
 > **Note:** The `PgConnection` used to start the transaction must outlive the `Transaction` object. Dropping a `Transaction` without calling `commit()` or `rollback()` automatically issues `ROLLBACK`.
 
+### Async Functions
+
+ZenC `async/await` is supported via wrapper functions. Under the hood ZenC v0.4 uses OS threads, so these wrappers run the blocking libpq call on a background thread.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `pg_connect_async` | `async fn pg_connect_async(conninfo: char*) -> Result<PgConnection>` | Opens a connection asynchronously |
+| `pg_query_async` | `async fn pg_query_async(conn: PgConnection*, sql: char*) -> Result<PgResult>` | Executes a query asynchronously |
+| `pg_exec_async` | `async fn pg_exec_async(conn: PgConnection*, sql: char*) -> Result<bool>` | Executes a command asynchronously |
+| `pg_query_params_async` | `async fn pg_query_params_async(conn: PgConnection*, sql: char*, params: char**, nParams: int) -> Result<PgResult>` | Parameterized query asynchronously |
+| `pg_exec_params_async` | `async fn pg_exec_params_async(conn: PgConnection*, sql: char*, params: char**, nParams: int) -> Result<bool>` | Parameterized command asynchronously |
+| `pg_begin_async` | `async fn pg_begin_async(conn: PgConnection*) -> Result<Transaction>` | Begins a transaction asynchronously |
+| `pg_tx_commit_async` | `async fn pg_tx_commit_async(tx: Transaction*) -> Result<bool>` | Commits a transaction asynchronously |
+| `pg_tx_rollback_async` | `async fn pg_tx_rollback_async(tx: Transaction*) -> Result<bool>` | Rolls back a transaction asynchronously |
+| `pg_tx_exec_async` | `async fn pg_tx_exec_async(tx: Transaction*, sql: char*) -> Result<bool>` | Async command inside a transaction |
+| `pg_tx_query_async` | `async fn pg_tx_query_async(tx: Transaction*, sql: char*) -> Result<PgResult>` | Async query inside a transaction |
+| `pg_tx_query_params_async` | `async fn pg_tx_query_params_async(tx: Transaction*, sql: char*, params: char**, nParams: int) -> Result<PgResult>` | Async parameterized query in a transaction |
+| `pg_tx_exec_params_async` | `async fn pg_tx_exec_params_async(tx: Transaction*, sql: char*, params: char**, nParams: int) -> Result<bool>` | Async parameterized command in a transaction |
+
+> **Lifetime safety:** The `conn` or `tx` pointer passed to an async function must remain valid until the future is awaited. Do not drop the connection or transaction before awaiting the result.
+
 ---
 
 ## Error Handling
@@ -310,6 +331,30 @@ if (r1.is_ok() && r2.is_ok()) {
 }
 ```
 
+### Async queries
+
+Run blocking operations on background threads using ZenC's `async`/`await`:
+
+```zc
+// Establish two connections in parallel
+let f1 = pg_connect_async("host=db1 dbname=shop user=postgres");
+let f2 = pg_connect_async("host=db2 dbname=shop user=postgres");
+
+let conn1 = (await f1).unwrap();
+let conn2 = (await f2).unwrap();
+
+// Run queries in parallel on different connections
+let q1 = pg_query_async(&conn1, "SELECT * FROM inventory");
+let q2 = pg_query_async(&conn2, "SELECT * FROM orders");
+
+let res1 = (await q1).unwrap();
+let res2 = (await q2).unwrap();
+
+println "Inventory rows: {res1.row_count()}, Order rows: {res2.row_count()}";
+```
+
+> **Note:** ZenC's current `async/await` implementation uses OS threads. The pointer passed to an async wrapper (`&conn`, `&tx`) must remain valid until the future is awaited.
+
 ### Parameterized queries
 
 Use `exec_params` and `query_params` to pass values safely without manual escaping:
@@ -358,6 +403,8 @@ Or run individual test files directly:
 zc run tests/test_connection.zc
 zc run tests/test_query.zc
 zc run tests/test_null.zc
+zc run tests/test_transaction.zc
+zc run tests/test_async.zc
 ```
 
 ### Running the Demo
@@ -374,7 +421,7 @@ If no server is available, the tests and demo will report connection errors.
 
 - [x] **Parameterized queries** — `PQexecParams` wrapper for safe value binding
 - [x] **Transactions** — Dedicated `Transaction` struct with `commit()` / `rollback()`
-- [ ] **Async support** — Integration with ZenC's `async` / `await`
+- [x] **Async support** — Integration with ZenC's `async` / `await`
 - [ ] **Connection pooling** — Simple pool for concurrent workloads
 - [ ] **Iterator interface** — Row-by-row iteration over `PgResult`
 - [x] **Better NULL handling** — Return `Option<String>` instead of empty strings
