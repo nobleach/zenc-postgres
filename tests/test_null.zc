@@ -1,0 +1,33 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "std/string.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "is_null detects null values" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+    conn.exec("INSERT INTO zenc_test_suite (name) VALUES (NULL)");
+
+    let query_res = conn.query("SELECT name FROM zenc_test_suite");
+    assert(!query_res.is_err(), "SELECT failed");
+    let result = query_res.unwrap();
+
+    assert(result.row_count() == 1, "Expected 1 row");
+    assert(result.is_null(0, 0), "Expected name to be NULL");
+
+    let value = result.get(0, 0);
+    let expected_empty = String::from("");
+    assert(value == &expected_empty, "Expected empty string for NULL");
+    value.destroy();
+    expected_empty.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "is_null detects null values passed";
+}

@@ -1,0 +1,60 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "std/string.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "query returns correct rows and columns" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+    conn.exec("INSERT INTO zenc_test_suite (name) VALUES ('Alice'), ('Bob')");
+
+    let query_res = conn.query("SELECT id, name FROM zenc_test_suite ORDER BY id");
+    assert(!query_res.is_err(), "SELECT failed");
+    let result = query_res.unwrap();
+
+    assert(result.row_count() == 2, "Expected 2 rows");
+    assert(result.column_count() == 2, "Expected 2 columns");
+
+    let col0 = result.column_name(0);
+    let col1 = result.column_name(1);
+    let expected_col0 = String::from("id");
+    let expected_col1 = String::from("name");
+    assert(col0 == &expected_col0, "First column should be id");
+    assert(col1 == &expected_col1, "Second column should be name");
+    col0.destroy();
+    col1.destroy();
+    expected_col0.destroy();
+    expected_col1.destroy();
+
+    let id0 = result.get(0, 0);
+    let name0 = result.get(0, 1);
+    let expected_id0 = String::from("1");
+    let expected_name0 = String::from("Alice");
+    assert(id0 == &expected_id0, "First id should be 1");
+    assert(name0 == &expected_name0, "First name should be Alice");
+    id0.destroy();
+    name0.destroy();
+    expected_id0.destroy();
+    expected_name0.destroy();
+
+    let id1 = result.get(1, 0);
+    let name1 = result.get(1, 1);
+    let expected_id1 = String::from("2");
+    let expected_name1 = String::from("Bob");
+    assert(id1 == &expected_id1, "Second id should be 2");
+    assert(name1 == &expected_name1, "Second name should be Bob");
+    id1.destroy();
+    name1.destroy();
+    expected_id1.destroy();
+    expected_name1.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "query returns correct rows and columns passed";
+}

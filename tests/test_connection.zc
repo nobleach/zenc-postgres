@@ -1,0 +1,20 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "connection with valid credentials succeeds" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Expected connection to succeed");
+    let conn = conn_res.unwrap();
+    // PgConnection is dropped automatically at end of scope
+    "connection with valid credentials succeeds passed";
+}
+
+test "connection with bad host fails" {
+    let conn_res = PgConnection::new("host=127.0.0.1 port=1 dbname=test user=test");
+    assert(conn_res.is_err(), "Expected connection to fail with unreachable host");
+    "connection with bad host fails passed";
+}

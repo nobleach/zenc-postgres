@@ -1,0 +1,10 @@
+import "std/env.zc"
+import "std/option.zc"
+
+fn get_test_conninfo() -> char* {
+    let opt = Env::get("ZENC_PG_TEST_CONNINFO");
+    if (opt.is_some()) {
+        return opt.unwrap();
+    }
+    return "host=localhost dbname=postgres user=postgres";
+}

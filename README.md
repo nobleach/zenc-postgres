@@ -265,21 +265,37 @@ if (r1.is_ok() && r2.is_ok() && r3.is_ok()) {
 
 ## Testing
 
-To run the included demo:
+### Running the Test Suite
+
+This project includes an integration test suite in the `tests/` directory.
 
 1. Ensure you have a PostgreSQL server running on `localhost`.
-2. Update the connection string in `main.zc` with your credentials.
-3. Run:
+2. (Optional) Set the `ZENC_PG_TEST_CONNINFO` environment variable if your server uses non-default credentials:
 
    ```bash
-   zc run main.zc
+   export ZENC_PG_TEST_CONNINFO="host=localhost dbname=postgres user=postgres password=secret"
+   ```
+3. Run all tests:
+
+   ```bash
+   ./run_tests.sh
    ```
 
-If no server is available, the program will gracefully print:
+Or run individual test files directly:
 
+```bash
+zc run tests/test_connection.zc
+zc run tests/test_query.zc
+zc run tests/test_null.zc
 ```
-Failed to connect: Connection failed
+
+### Running the Demo
+
+```bash
+zc run main.zc
 ```
+
+If no server is available, the tests and demo will report connection errors.
 
 ---
 

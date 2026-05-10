@@ -1,0 +1,39 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "exec create and drop table" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    let drop_res = conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    assert(!drop_res.is_err(), "DROP TABLE IF EXISTS failed");
+
+    let create_res = conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+    assert(!create_res.is_err(), "CREATE TABLE failed");
+
+    let drop_res2 = conn.exec("DROP TABLE zenc_test_suite");
+    assert(!drop_res2.is_err(), "DROP TABLE failed");
+
+    "exec create and drop table passed";
+}
+
+test "exec insert" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let insert_res = conn.exec("INSERT INTO zenc_test_suite (name) VALUES ('Alice')");
+    assert(!insert_res.is_err(), "INSERT failed");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "exec insert passed";
+}
