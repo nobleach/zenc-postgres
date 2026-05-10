@@ -1,0 +1,182 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "std/string.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "pool creation and basic usage" {
+    let conninfo = get_test_conninfo();
+    let pool_res = PgPool::new(conninfo, 2);
+    assert(!pool_res.is_err(), "Pool creation failed");
+    let pool = pool_res.unwrap();
+
+    let pc_res = pool.get();
+    assert(!pc_res.is_err(), "Pool get failed");
+    let pc = pc_res.unwrap();
+
+    let query_res = pc.query("SELECT 42 AS answer");
+    assert(!query_res.is_err(), "Query failed");
+    let result = query_res.unwrap();
+    assert(result.row_count() == 1, "Expected 1 row");
+
+    let val = result.get(0, 0).unwrap();
+    let expected = String::from("42");
+    assert(val == &expected, "Expected 42");
+    val.destroy();
+    expected.destroy();
+
+    pc.release();
+    "pool creation and basic usage passed";
+}
+
+test "pool auto release on drop" {
+    let conninfo = get_test_conninfo();
+    let pool_res = PgPool::new(conninfo, 2);
+    assert(!pool_res.is_err(), "Pool creation failed");
+    let pool = pool_res.unwrap();
+
+    {
+        let pc_res = pool.get();
+        assert(!pc_res.is_err(), "Pool get failed");
+        let pc = pc_res.unwrap();
+
+        let query_res = pc.query("SELECT 1 AS one");
+        assert(!query_res.is_err(), "Query failed");
+        // pc dropped here, auto-releases connection back to pool
+    }
+
+    // Should be able to get connection again since it was auto-released
+    let pc2_res = pool.get();
+    assert(!pc2_res.is_err(), "Second get after auto-release failed");
+    let pc2 = pc2_res.unwrap();
+    pc2.release();
+
+    "pool auto release on drop passed";
+}
+
+test "pool multiple checkouts" {
+    let conninfo = get_test_conninfo();
+    let pool_res = PgPool::new(conninfo, 2);
+    assert(!pool_res.is_err(), "Pool creation failed");
+    let pool = pool_res.unwrap();
+
+    let pc1_res = pool.get();
+    assert(!pc1_res.is_err(), "First get failed");
+    let pc1 = pc1_res.unwrap();
+
+    let pc2_res = pool.get();
+    assert(!pc2_res.is_err(), "Second get failed");
+    let pc2 = pc2_res.unwrap();
+
+    let q1 = pc1.query("SELECT 1 AS one");
+    assert(!q1.is_err(), "Query on pc1 failed");
+
+    let q2 = pc2.query("SELECT 2 AS two");
+    assert(!q2.is_err(), "Query on pc2 failed");
+
+    pc1.release();
+    pc2.release();
+    "pool multiple checkouts passed";
+}
+
+async fn pool_worker(pool: PgPool*, name: char*) -> int {
+    let pc_res = pool.get();
+    if (pc_res.is_err()) {
+        return 0;
+    }
+    let pc = pc_res.unwrap();
+
+    let params = [name];
+    let query_res = pc.query_params(
+        "SELECT name FROM zenc_pool_test WHERE name = $1",
+        params, 1
+    );
+    if (query_res.is_err()) {
+        pc.release();
+        return 0;
+    }
+    let result = query_res.unwrap();
+    let row_count = result.row_count();
+    pc.release();
+    return row_count;
+}
+
+test "pool async parallel checkouts" {
+    let conninfo = get_test_conninfo();
+    let pool_res = PgPool::new(conninfo, 1);
+    assert(!pool_res.is_err(), "Pool creation failed");
+    let pool = pool_res.unwrap();
+
+    // Pre-populate a table so both tasks have something to query
+    let setup_res = pool.get();
+    assert(!setup_res.is_err(), "Setup get failed");
+    let setup = setup_res.unwrap();
+    setup.exec("DROP TABLE IF EXISTS zenc_pool_test");
+    setup.exec("CREATE TABLE zenc_pool_test (id SERIAL PRIMARY KEY, name TEXT)");
+    setup.exec("INSERT INTO zenc_pool_test (name) VALUES ('Alice'), ('Bob')");
+    setup.release();
+
+    let f1 = pool_worker(&pool, "Alice");
+    let f2 = pool_worker(&pool, "Bob");
+
+    let r1 = await f1;
+    let r2 = await f2;
+
+    assert(r1 == 1, "Worker 1 should find 1 row");
+    assert(r2 == 1, "Worker 2 should find 1 row");
+
+    let cleanup_res = pool.get();
+    assert(!cleanup_res.is_err(), "Cleanup get failed");
+    let cleanup = cleanup_res.unwrap();
+    cleanup.exec("DROP TABLE IF EXISTS zenc_pool_test");
+    cleanup.release();
+
+    "pool async parallel checkouts passed";
+}
+
+test "pool invalid size" {
+    let conninfo = get_test_conninfo();
+    let pool_res = PgPool::new(conninfo, 0);
+    assert(pool_res.is_err(), "Pool with size 0 should fail");
+    "pool invalid size passed";
+}
+
+test "pool transaction checkout" {
+    let conninfo = get_test_conninfo();
+    let pool_res = PgPool::new(conninfo, 2);
+    assert(!pool_res.is_err(), "Pool creation failed");
+    let pool = pool_res.unwrap();
+
+    let pc_res = pool.get();
+    assert(!pc_res.is_err(), "Pool get failed");
+    let pc = pc_res.unwrap();
+
+    pc.exec("DROP TABLE IF EXISTS zenc_pool_test");
+    pc.exec("CREATE TABLE zenc_pool_test (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let tx_res = pc.begin();
+    assert(!tx_res.is_err(), "BEGIN failed");
+    let tx = tx_res.unwrap();
+
+    let insert_res = tx.exec("INSERT INTO zenc_pool_test (name) VALUES ('PoolTx')");
+    assert(!insert_res.is_err(), "INSERT in transaction failed");
+
+    let commit_res = tx.commit();
+    assert(!commit_res.is_err(), "COMMIT failed");
+
+    let verify_res = pc.query("SELECT name FROM zenc_pool_test");
+    assert(!verify_res.is_err(), "Verify query failed");
+    let result = verify_res.unwrap();
+    assert(result.row_count() == 1, "Expected 1 row after commit");
+
+    let name = result.get(0, 0).unwrap();
+    let expected_name = String::from("PoolTx");
+    assert(name == &expected_name, "Expected PoolTx");
+    name.destroy();
+    expected_name.destroy();
+
+    pc.exec("DROP TABLE IF EXISTS zenc_pool_test");
+    pc.release();
+    "pool transaction checkout passed";
+}

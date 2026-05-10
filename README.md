@@ -194,6 +194,35 @@ ZenC `async/await` is supported via wrapper functions. Under the hood ZenC v0.4 
 
 > **Lifetime safety:** The `conn` or `tx` pointer passed to an async function must remain valid until the future is awaited. Do not drop the connection or transaction before awaiting the result.
 
+### `PgPool`
+
+A fixed-size, thread-safe connection pool. Pre-warms connections on creation and reuses them across concurrent workloads.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `new` | `fn new(conninfo: char*, max_size: int) -> Result<PgPool>` | Creates a pool of `max_size` connections |
+| `get` | `fn get(self) -> Result<PooledConnection>` | Blocking checkout of a connection from the pool |
+
+### `PooledConnection`
+
+A borrowed connection from the pool. Automatically returns to the pool on drop.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `exec` | `fn exec(self, sql: char*) -> Result<bool>` | Executes a command |
+| `query` | `fn query(self, sql: char*) -> Result<PgResult>` | Executes a query |
+| `exec_params` | `fn exec_params(self, sql: char*, params: char**, nParams: int) -> Result<bool>` | Parameterized command |
+| `query_params` | `fn query_params(self, sql: char*, params: char**, nParams: int) -> Result<PgResult>` | Parameterized query |
+| `begin` | `fn begin(self) -> Result<Transaction>` | Begins a transaction |
+| `last_error` | `fn last_error(self) -> String` | Returns the last libpq error message |
+| `release` | `fn release(self)` | Manually returns the connection to the pool |
+
+| Async Function | Signature | Description |
+|----------------|-----------|-------------|
+| `pg_pool_get_async` | `async fn pg_pool_get_async(pool: PgPool*) -> Result<PooledConnection>` | Async checkout from the pool |
+
+> **Note:** `PooledConnection` holds a pointer into the pool's internal array. The `PgPool` must outlive all checked-out `PooledConnection` objects.
+
 ---
 
 ## Error Handling
@@ -355,6 +384,28 @@ println "Inventory rows: {res1.row_count()}, Order rows: {res2.row_count()}";
 
 > **Note:** ZenC's current `async/await` implementation uses OS threads. The pointer passed to an async wrapper (`&conn`, `&tx`) must remain valid until the future is awaited.
 
+### Connection pool
+
+Reuse connections across concurrent workloads with a fixed-size pool:
+
+```zc
+let pool = PgPool::new("host=localhost dbname=shop user=postgres", 4).unwrap();
+
+// Two workers share the pool (only 4 connections ever created)
+{
+    let pc = pool.get().unwrap();
+    let res = pc.query("SELECT * FROM inventory");
+    // PooledConnection auto-releases on drop
+}
+
+{
+    let pc = pool.get().unwrap();
+    let tx = pc.begin().unwrap();
+    tx.exec("UPDATE inventory SET qty = qty - 1 WHERE id = 42");
+    tx.commit();
+}
+```
+
 ### Parameterized queries
 
 Use `exec_params` and `query_params` to pass values safely without manual escaping:
@@ -405,6 +456,7 @@ zc run tests/test_query.zc
 zc run tests/test_null.zc
 zc run tests/test_transaction.zc
 zc run tests/test_async.zc
+zc run tests/test_pool.zc
 ```
 
 ### Running the Demo
@@ -422,7 +474,7 @@ If no server is available, the tests and demo will report connection errors.
 - [x] **Parameterized queries** — `PQexecParams` wrapper for safe value binding
 - [x] **Transactions** — Dedicated `Transaction` struct with `commit()` / `rollback()`
 - [x] **Async support** — Integration with ZenC's `async` / `await`
-- [ ] **Connection pooling** — Simple pool for concurrent workloads
+- [x] **Connection pooling** — Simple pool for concurrent workloads
 - [ ] **Iterator interface** — Row-by-row iteration over `PgResult`
 - [x] **Better NULL handling** — Return `Option<String>` instead of empty strings
 
