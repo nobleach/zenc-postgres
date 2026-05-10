@@ -1,0 +1,117 @@
+import "./sys.zc"
+
+import "std/result.zc"
+import "std/string.zc"
+
+extern fn _z_pg_connect(conninfo: const char*) -> void*;
+extern fn _z_pg_finish(conn: void*);
+extern fn _z_pg_status(conn: void*) -> c_int;
+extern fn _z_pg_error(conn: void*) -> char*;
+extern fn _z_pg_exec(conn: void*, command: const char*) -> void*;
+extern fn _z_pg_clear(res: void*);
+extern fn _z_pg_result_status(res: void*) -> c_int;
+extern fn _z_pg_result_error(res: void*) -> char*;
+extern fn _z_pg_ntuples(res: void*) -> c_int;
+extern fn _z_pg_nfields(res: void*) -> c_int;
+extern fn _z_pg_fname(res: void*, col: c_int) -> char*;
+extern fn _z_pg_getvalue(res: void*, row: c_int, col: c_int) -> char*;
+extern fn _z_pg_getisnull(res: void*, row: c_int, col: c_int) -> c_int;
+extern fn _z_pg_connection_ok() -> c_int;
+extern fn _z_pg_res_command_ok() -> c_int;
+extern fn _z_pg_res_tuples_ok() -> c_int;
+
+struct PgConnection {
+    handle: void*;
+}
+
+struct PgResult {
+    handle: void*;
+}
+
+impl PgConnection {
+    fn new(conninfo: char*) -> Result<PgConnection> {
+        let handle = _z_pg_connect(conninfo);
+        if (handle == NULL) {
+            return Result<PgConnection>::Err("Failed to allocate connection");
+        }
+        let status = _z_pg_status(handle);
+        if (status != _z_pg_connection_ok()) {
+            _z_pg_finish(handle);
+            return Result<PgConnection>::Err("Connection failed");
+        }
+        return Result<PgConnection>::Ok(PgConnection { handle: handle });
+    }
+
+    fn query(self, sql: char*) -> Result<PgResult> {
+        let res = _z_pg_exec(self.handle, sql);
+        if (res == NULL) {
+            return Result<PgResult>::Err("Query failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        if (status != _z_pg_res_command_ok() && status != _z_pg_res_tuples_ok()) {
+            _z_pg_clear(res);
+            return Result<PgResult>::Err("Query failed");
+        }
+        return Result<PgResult>::Ok(PgResult { handle: res });
+    }
+
+    fn exec(self, sql: char*) -> Result<bool> {
+        let res = _z_pg_exec(self.handle, sql);
+        if (res == NULL) {
+            return Result<bool>::Err("Exec failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        _z_pg_clear(res);
+        if (status != _z_pg_res_command_ok()) {
+            return Result<bool>::Err("Exec failed");
+        }
+        return Result<bool>::Ok(true);
+    }
+
+    fn last_error(self) -> String {
+        return String::from(_z_pg_error(self.handle));
+    }
+}
+
+impl Drop for PgConnection {
+    fn drop(self) {
+        if (self.handle != NULL) {
+            _z_pg_finish(self.handle);
+            self.handle = NULL;
+        }
+    }
+}
+
+impl PgResult {
+    fn row_count(self) -> c_int {
+        return _z_pg_ntuples(self.handle);
+    }
+
+    fn column_count(self) -> c_int {
+        return _z_pg_nfields(self.handle);
+    }
+
+    fn column_name(self, col: c_int) -> String {
+        return String::from(_z_pg_fname(self.handle, col));
+    }
+
+    fn get(self, row: c_int, col: c_int) -> String {
+        if (_z_pg_getisnull(self.handle, row, col)) {
+            return String::from("");
+        }
+        return String::from(_z_pg_getvalue(self.handle, row, col));
+    }
+
+    fn is_null(self, row: c_int, col: c_int) -> bool {
+        return _z_pg_getisnull(self.handle, row, col) != 0;
+    }
+}
+
+impl Drop for PgResult {
+    fn drop(self) {
+        if (self.handle != NULL) {
+            _z_pg_clear(self.handle);
+            self.handle = NULL;
+        }
+    }
+}

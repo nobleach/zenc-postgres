@@ -1,0 +1,69 @@
+//> link: -lpq
+
+include <libpq-fe.h>
+
+raw {
+    void* _z_pg_connect(const char* conninfo) {
+        return PQconnectdb(conninfo);
+    }
+
+    void _z_pg_finish(void* conn) {
+        PQfinish((PGconn*)conn);
+    }
+
+    int _z_pg_status(void* conn) {
+        return (int)PQstatus((PGconn*)conn);
+    }
+
+    char* _z_pg_error(void* conn) {
+        return (char*)PQerrorMessage((PGconn*)conn);
+    }
+
+    void* _z_pg_exec(void* conn, const char* command) {
+        return PQexec((PGconn*)conn, command);
+    }
+
+    void _z_pg_clear(void* res) {
+        PQclear((PGresult*)res);
+    }
+
+    int _z_pg_result_status(void* res) {
+        return (int)PQresultStatus((PGresult*)res);
+    }
+
+    char* _z_pg_result_error(void* res) {
+        return (char*)PQresultErrorMessage((PGresult*)res);
+    }
+
+    int _z_pg_ntuples(void* res) {
+        return PQntuples((PGresult*)res);
+    }
+
+    int _z_pg_nfields(void* res) {
+        return PQnfields((PGresult*)res);
+    }
+
+    char* _z_pg_fname(void* res, int col) {
+        return (char*)PQfname((PGresult*)res, col);
+    }
+
+    char* _z_pg_getvalue(void* res, int row, int col) {
+        return (char*)PQgetvalue((PGresult*)res, row, col);
+    }
+
+    int _z_pg_getisnull(void* res, int row, int col) {
+        return PQgetisnull((PGresult*)res, row, col);
+    }
+
+    int _z_pg_connection_ok() {
+        return CONNECTION_OK;
+    }
+
+    int _z_pg_res_command_ok() {
+        return PGRES_COMMAND_OK;
+    }
+
+    int _z_pg_res_tuples_ok() {
+        return PGRES_TUPLES_OK;
+    }
+}

@@ -1,0 +1,52 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "./pg/pg.zc"
+
+fn main() {
+    let conninfo = "host=localhost dbname=postgres user=postgres";
+    let conn_res = PgConnection::new(conninfo);
+
+    if (conn_res.is_err()) {
+        println "Failed to connect: {conn_res.err}";
+    } else {
+        let conn = conn_res.unwrap();
+
+        // Create a test table
+        let create_res = conn.exec("CREATE TABLE IF NOT EXISTS zenc_test_users (id SERIAL PRIMARY KEY, name TEXT)");
+        if (create_res.is_err()) {
+            println "CREATE failed: {create_res.err}";
+        } else {
+            // Insert some rows
+            let insert_res = conn.exec("INSERT INTO zenc_test_users (name) VALUES ('Alice'), ('Bob') ON CONFLICT DO NOTHING");
+            if (insert_res.is_err()) {
+                println "INSERT failed: {insert_res.err}";
+            } else {
+                // Query back
+                let query_res = conn.query("SELECT id, name FROM zenc_test_users");
+                if (query_res.is_err()) {
+                    println "SELECT failed: {query_res.err}";
+                } else {
+                    let result = query_res.unwrap();
+
+                    println "Rows: {result.row_count()}, Columns: {result.column_count()}";
+
+                    for (let i = 0; i < result.row_count(); i = i + 1) {
+                        let id = result.get(i, 0);
+                        let name = result.get(i, 1);
+                        println "{id} | {name}";
+                        id.destroy();
+                        name.destroy();
+                    }
+
+                    // Show column names
+                    let col0 = result.column_name(0);
+                    let col1 = result.column_name(1);
+                    println "Columns: {col0}, {col1}";
+                    col0.destroy();
+                    col1.destroy();
+                }
+            }
+        }
+    }
+}
