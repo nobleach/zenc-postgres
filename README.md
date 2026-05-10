@@ -134,6 +134,8 @@ Represents an open connection to a PostgreSQL server.
 | `new` | `fn new(conninfo: char*) -> Result<PgConnection>` | Opens a connection using a libpq connection string |
 | `query` | `fn query(self, sql: char*) -> Result<PgResult>` | Executes a SQL query that returns rows (e.g. `SELECT`) |
 | `exec` | `fn exec(self, sql: char*) -> Result<bool>` | Executes a SQL command with no result set (e.g. `CREATE`, `INSERT`) |
+| `query_params` | `fn query_params(self, sql: char*, params: char**, nParams: c_int) -> Result<PgResult>` | Executes a parameterized query (e.g. `SELECT ... WHERE x = $1`) |
+| `exec_params` | `fn exec_params(self, sql: char*, params: char**, nParams: c_int) -> Result<bool>` | Executes a parameterized command (e.g. `INSERT ... VALUES ($1, $2)`) |
 | `last_error` | `fn last_error(self) -> String` | Returns the last libpq error message |
 
 **Connection string examples:**
@@ -261,6 +263,28 @@ if (r1.is_ok() && r2.is_ok() && r3.is_ok()) {
 }
 ```
 
+### Parameterized queries
+
+Use `exec_params` and `query_params` to pass values safely without manual escaping:
+
+```zc
+let conn = PgConnection::new("host=localhost dbname=shop").unwrap();
+
+let params = ["Alice", "30"];
+let insert = conn.exec_params(
+    "INSERT INTO users (name, age) VALUES ($1, $2)",
+    params, 2
+);
+
+let query_params = ["Alice"];
+let res = conn.query_params(
+    "SELECT id, name, age FROM users WHERE name = $1",
+    query_params, 1
+).unwrap();
+
+println "Rows: {res.row_count()}";
+```
+
 ---
 
 ## Testing
@@ -301,7 +325,7 @@ If no server is available, the tests and demo will report connection errors.
 
 ## Future Work
 
-- [ ] **Parameterized queries** — `PQexecParams` wrapper for safe value binding
+- [x] **Parameterized queries** — `PQexecParams` wrapper for safe value binding
 - [ ] **Transactions** — Dedicated `Transaction` struct with `commit()` / `rollback()`
 - [ ] **Async support** — Integration with ZenC's `async` / `await`
 - [ ] **Connection pooling** — Simple pool for concurrent workloads

@@ -1,0 +1,118 @@
+//> link: -lpq
+
+import "std/io.zc"
+import "std/string.zc"
+import "../pg/pg.zc"
+import "./common.zc"
+
+test "exec_params inserts data safely" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT, age INT)");
+
+    let params = ["Alice", "30"];
+    let insert_res = conn.exec_params(
+        "INSERT INTO zenc_test_suite (name, age) VALUES ($1, $2)",
+        params, 2
+    );
+    assert(!insert_res.is_err(), "Parameterized INSERT failed");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "exec_params inserts data safely passed";
+}
+
+test "query_params selects with where clause" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+    conn.exec("INSERT INTO zenc_test_suite (name) VALUES ('Alice'), ('Bob'), ('Charlie')");
+
+    let params = ["Bob"];
+    let query_res = conn.query_params(
+        "SELECT id, name FROM zenc_test_suite WHERE name = $1",
+        params, 1
+    );
+    assert(!query_res.is_err(), "Parameterized SELECT failed");
+    let result = query_res.unwrap();
+
+    assert(result.row_count() == 1, "Expected exactly 1 row");
+    assert(result.column_count() == 2, "Expected 2 columns");
+
+    let name = result.get(0, 1);
+    let expected_name = String::from("Bob");
+    assert(name == &expected_name, "Expected name to be Bob");
+    name.destroy();
+    expected_name.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "query_params selects with where clause passed";
+}
+
+test "exec_params with null parameter" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let null_param: char* = NULL;
+    let params = [null_param];
+    let insert_res = conn.exec_params(
+        "INSERT INTO zenc_test_suite (name) VALUES ($1)",
+        params, 1
+    );
+    assert(!insert_res.is_err(), "Parameterized INSERT with NULL failed");
+
+    let query_res = conn.query("SELECT name FROM zenc_test_suite");
+    assert(!query_res.is_err(), "SELECT failed");
+    let result = query_res.unwrap();
+
+    assert(result.row_count() == 1, "Expected 1 row");
+    assert(result.is_null(0, 0), "Expected name to be NULL");
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "exec_params with null parameter passed";
+}
+
+test "exec_params prevents sql injection" {
+    let conninfo = get_test_conninfo();
+    let conn_res = PgConnection::new(conninfo);
+    assert(!conn_res.is_err(), "Connection failed");
+    let conn = conn_res.unwrap();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    conn.exec("CREATE TABLE zenc_test_suite (id SERIAL PRIMARY KEY, name TEXT)");
+
+    let malicious = "'; DROP TABLE zenc_test_suite; --";
+    let params = [malicious];
+    let insert_res = conn.exec_params(
+        "INSERT INTO zenc_test_suite (name) VALUES ($1)",
+        params, 1
+    );
+    assert(!insert_res.is_err(), "Parameterized INSERT with malicious string failed");
+
+    // Verify the table still exists by querying it
+    let verify_res = conn.query("SELECT name FROM zenc_test_suite");
+    assert(!verify_res.is_err(), "Table should still exist");
+    let result = verify_res.unwrap();
+
+    assert(result.row_count() == 1, "Expected 1 row");
+    let name = result.get(0, 0);
+    let expected_name = String::from("'; DROP TABLE zenc_test_suite; --");
+    assert(name == &expected_name, "Malicious string should be stored as literal text");
+    name.destroy();
+    expected_name.destroy();
+
+    conn.exec("DROP TABLE IF EXISTS zenc_test_suite");
+    "exec_params prevents sql injection passed";
+}

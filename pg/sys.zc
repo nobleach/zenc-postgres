@@ -23,6 +23,10 @@ raw {
         return PQexec((PGconn*)conn, command);
     }
 
+    void* _z_pg_exec_params(void* conn, const char* command, int nParams, char** paramValues) {
+        return PQexecParams((PGconn*)conn, command, nParams, NULL, (const char* const*)paramValues, NULL, NULL, 0);
+    }
+
     void _z_pg_clear(void* res) {
         PQclear((PGresult*)res);
     }
