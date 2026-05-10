@@ -3,6 +3,8 @@ import "./sys.zc"
 import "std/option.zc"
 import "std/result.zc"
 import "std/string.zc"
+import "std/sync.zc"
+import "std/mem.zc"
 
 extern fn _z_pg_connect(conninfo: const char*) -> void*;
 extern fn _z_pg_finish(conn: void*);
@@ -292,4 +294,148 @@ async fn pg_tx_query_params_async(tx: Transaction*, sql: char*, params: char**, 
 
 async fn pg_tx_exec_params_async(tx: Transaction*, sql: char*, params: char**, nParams: int) -> Result<bool> {
     return tx.exec_params(sql, params, nParams);
+}
+
+// --- Connection Pool ---
+
+struct PgPool {
+    conninfo: char*;
+    max_size: int;
+    connections: PgConnection*;
+    in_use: bool*;
+    mut: Mutex;
+    cond: CondVar;
+}
+
+struct PooledConnection {
+    pool: PgPool*;
+    index: int;
+    conn: PgConnection*;
+}
+
+impl PgPool {
+    fn new(conninfo: char*, max_size: int) -> Result<PgPool> {
+        if (max_size <= 0) {
+            return Result<PgPool>::Err("Pool size must be positive");
+        }
+
+        let connections = alloc_n<PgConnection>(max_size);
+        let in_use = alloc_n<bool>(max_size);
+
+        for (let i = 0; i < max_size; i = i + 1) {
+            in_use[i] = false;
+        }
+
+        for (let i = 0; i < max_size; i = i + 1) {
+            let conn_res = PgConnection::new(conninfo);
+            if (conn_res.is_err()) {
+                for (let j = 0; j < i; j = j + 1) {
+                    if (connections[j].handle != NULL) {
+                        _z_pg_finish(connections[j].handle);
+                        connections[j].handle = NULL;
+                    }
+                }
+                dealloc<PgConnection>(connections);
+                dealloc<bool>(in_use);
+                return Result<PgPool>::Err("Failed to initialize pool connection");
+            }
+            connections[i] = conn_res.unwrap();
+        }
+
+        return Result<PgPool>::Ok(PgPool {
+            conninfo: conninfo,
+            max_size: max_size,
+            connections: connections,
+            in_use: in_use,
+            mut: Mutex::new(),
+            cond: CondVar::new()
+        });
+    }
+
+    fn get(self) -> Result<PooledConnection> {
+        self.mut.lock();
+
+        while (true) {
+            for (let i = 0; i < self.max_size; i = i + 1) {
+                if (!self.in_use[i]) {
+                    self.in_use[i] = true;
+                    self.mut.unlock();
+                    let conn = &self.connections[i];
+                    return Result<PooledConnection>::Ok(PooledConnection {
+                        pool: self,
+                        index: i,
+                        conn: conn
+                    });
+                }
+            }
+            self.cond.wait(&self.mut);
+        }
+
+        return Result<PooledConnection>::Err("Pool get failed");
+    }
+
+    fn _release(self, index: int) {
+        self.mut.lock();
+        self.in_use[index] = false;
+        self.cond.signal();
+        self.mut.unlock();
+    }
+}
+
+impl Drop for PgPool {
+    fn drop(self) {
+        for (let i = 0; i < self.max_size; i = i + 1) {
+            if (self.connections[i].handle != NULL) {
+                _z_pg_finish(self.connections[i].handle);
+                self.connections[i].handle = NULL;
+            }
+        }
+        dealloc<PgConnection>(self.connections);
+        dealloc<bool>(self.in_use);
+    }
+}
+
+impl PooledConnection {
+    fn exec(self, sql: char*) -> Result<bool> {
+        return self.conn.exec(sql);
+    }
+
+    fn query(self, sql: char*) -> Result<PgResult> {
+        return self.conn.query(sql);
+    }
+
+    fn query_params(self, sql: char*, params: char**, nParams: int) -> Result<PgResult> {
+        return self.conn.query_params(sql, params, nParams);
+    }
+
+    fn exec_params(self, sql: char*, params: char**, nParams: int) -> Result<bool> {
+        return self.conn.exec_params(sql, params, nParams);
+    }
+
+    fn last_error(self) -> String {
+        return self.conn.last_error();
+    }
+
+    fn begin(self) -> Result<Transaction> {
+        return self.conn.begin();
+    }
+
+    fn release(self) {
+        if (self.pool != NULL) {
+            self.pool._release(self.index);
+            self.pool = NULL;
+            self.conn = NULL;
+            self.index = -1;
+        }
+    }
+}
+
+impl Drop for PooledConnection {
+    fn drop(self) {
+        self.release();
+    }
+}
+
+async fn pg_pool_get_async(pool: PgPool*) -> Result<PooledConnection> {
+    return pool.get();
 }
