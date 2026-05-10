@@ -8,6 +8,7 @@ extern fn _z_pg_finish(conn: void*);
 extern fn _z_pg_status(conn: void*) -> c_int;
 extern fn _z_pg_error(conn: void*) -> char*;
 extern fn _z_pg_exec(conn: void*, command: const char*) -> void*;
+extern fn _z_pg_exec_params(conn: void*, command: const char*, nParams: c_int, paramValues: char**) -> void*;
 extern fn _z_pg_clear(res: void*);
 extern fn _z_pg_result_status(res: void*) -> c_int;
 extern fn _z_pg_result_error(res: void*) -> char*;
@@ -64,6 +65,32 @@ impl PgConnection {
         _z_pg_clear(res);
         if (status != _z_pg_res_command_ok()) {
             return Result<bool>::Err("Exec failed");
+        }
+        return Result<bool>::Ok(true);
+    }
+
+    fn query_params(self, sql: char*, params: char**, nParams: c_int) -> Result<PgResult> {
+        let res = _z_pg_exec_params(self.handle, sql, nParams, params);
+        if (res == NULL) {
+            return Result<PgResult>::Err("Query params failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        if (status != _z_pg_res_command_ok() && status != _z_pg_res_tuples_ok()) {
+            _z_pg_clear(res);
+            return Result<PgResult>::Err("Query params failed");
+        }
+        return Result<PgResult>::Ok(PgResult { handle: res });
+    }
+
+    fn exec_params(self, sql: char*, params: char**, nParams: c_int) -> Result<bool> {
+        let res = _z_pg_exec_params(self.handle, sql, nParams, params);
+        if (res == NULL) {
+            return Result<bool>::Err("Exec params failed (out of memory)");
+        }
+        let status = _z_pg_result_status(res);
+        _z_pg_clear(res);
+        if (status != _z_pg_res_command_ok()) {
+            return Result<bool>::Err("Exec params failed");
         }
         return Result<bool>::Ok(true);
     }
