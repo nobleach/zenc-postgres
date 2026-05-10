@@ -105,6 +105,17 @@ fn main() {
         id.destroy();
         name.destroy();
     }
+
+    // Or use the iterator interface:
+    // let iter = PgResultIterator::new(&result);
+    // while (iter.has_next()) {
+    //     let row = iter.next().unwrap();
+    //     let id   = row.get(0).unwrap();
+    //     let name = row.get(1).unwrap();
+    //     println "{id} | {name}";
+    //     id.destroy();
+    //     name.destroy();
+    // }
 }
 ```
 
@@ -222,6 +233,39 @@ A borrowed connection from the pool. Automatically returns to the pool on drop.
 | `pg_pool_get_async` | `async fn pg_pool_get_async(pool: PgPool*) -> Result<PooledConnection>` | Async checkout from the pool |
 
 > **Note:** `PooledConnection` holds a pointer into the pool's internal array. The `PgPool` must outlive all checked-out `PooledConnection` objects.
+
+### `PgResultIterator`
+
+Provides row-by-row iteration over a `PgResult`. The `PgResult` must outlive the iterator.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `new` | `fn new(result: PgResult*) -> PgResultIterator` | Creates an iterator over the given result |
+| `next` | `fn next(self) -> Option<Row>` | Returns the next row, or `None` if exhausted |
+| `has_next` | `fn has_next(self) -> bool` | Returns `true` if more rows are available |
+
+### `Row`
+
+Represents a single row within a result set.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `get` | `fn get(self, col: int) -> Option<String>` | Returns the value at the given column index — `None` for SQL `NULL` |
+| `column_count` | `fn column_count(self) -> int` | Number of columns in the row |
+
+```zc
+let result = conn.query("SELECT id, name FROM users").unwrap();
+let iter = PgResultIterator::new(&result);
+
+while (iter.has_next()) {
+    let row = iter.next().unwrap();
+    let id   = row.get(0).unwrap();
+    let name = row.get(1).unwrap();
+    println "{id} | {name}";
+    id.destroy();
+    name.destroy();
+}
+```
 
 ---
 
@@ -457,6 +501,7 @@ zc run tests/test_null.zc
 zc run tests/test_transaction.zc
 zc run tests/test_async.zc
 zc run tests/test_pool.zc
+zc run tests/test_iterator.zc
 ```
 
 ### Running the Demo
@@ -475,7 +520,7 @@ If no server is available, the tests and demo will report connection errors.
 - [x] **Transactions** — Dedicated `Transaction` struct with `commit()` / `rollback()`
 - [x] **Async support** — Integration with ZenC's `async` / `await`
 - [x] **Connection pooling** — Simple pool for concurrent workloads
-- [ ] **Iterator interface** — Row-by-row iteration over `PgResult`
+- [x] **Iterator interface** — Row-by-row iteration over `PgResult`
 - [x] **Better NULL handling** — Return `Option<String>` instead of empty strings
 
 ---

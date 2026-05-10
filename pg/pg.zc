@@ -150,6 +150,50 @@ impl Drop for PgResult {
     }
 }
 
+struct Row {
+    result: PgResult*;
+    index: int;
+}
+
+impl Row {
+    fn get(self, col: int) -> Option<String> {
+        return self.result.get(self.index, col);
+    }
+
+    fn column_count(self) -> int {
+        return self.result.column_count();
+    }
+}
+
+struct PgResultIterator {
+    result: PgResult*;
+    current: int;
+    total: int;
+}
+
+impl PgResultIterator {
+    fn new(result: PgResult*) -> PgResultIterator {
+        return PgResultIterator {
+            result: result,
+            current: 0,
+            total: result.row_count()
+        };
+    }
+
+    fn next(self) -> Option<Row> {
+        if (self.current >= self.total) {
+            return Option<Row>::None();
+        }
+        let row = Row { result: self.result, index: self.current };
+        self.current = self.current + 1;
+        return Option<Row>::Some(row);
+    }
+
+    fn has_next(self) -> bool {
+        return self.current < self.total;
+    }
+}
+
 struct Transaction {
     handle: void*;
     committed: bool;
